@@ -516,11 +516,23 @@ procedure_call : ID '(' expression_list ')' opt_assign ';'
 {
   struct Node *temp = search($1);
   if ($5 != NULL){
-    if (temp != NULL && strcmp(temp->data.kind, "array") == 0 && $3->next == NULL){
-      if (strcmp($3->kind, "number") == 0){
+    if (temp != NULL){
+      if (strcmp($3->kind, "number") == 0 && strcmp($5->kind, "number") == 0){
+	fprintf(fp, "%i:  contents b, %i := %i\n", instCtr++, temp->data.offset + $3->value, $5->value);
+      }else if (strcmp($3->kind, "number") == 0 && strcmp($5->kind, "register") == 0){
+	fprintf(fp, "%i:  contents b, %i := r%i\n", instCtr++, temp->data.offset + $3->value, $5->address);
+      }else if (strcmp($3->kind, "register") == 0 && strcmp($5->kind, "number") == 0){
+	int offsetStore = regNum++; int sumStore = regNum++;
+	fprintf(fp, "%i:  r%i := %i\n", instCtr++, offsetStore, temp->data.offset);
+	fprintf(fp, "%i:  r%i := r%i + r%i\n", instCtr++, sumStore, $3->address, offsetStore);
+	fprintf(fp, "%i:  contents b, r%i := %i\n", instCtr++, sumStore, $5->value);
       }else{
-
+	int offsetStore = regNum++; int sumStore = regNum++;
+	fprintf(fp, "%i:  r%i := %i\n", instCtr++, offsetStore, temp->data.offset);
+	fprintf(fp, "%i:  r%i := r%i + r%i\n", instCtr++, sumStore, $3->address, offsetStore);
+	fprintf(fp, "%i:  contents b, r%i := r%i\n", instCtr++, sumStore, sumStore);
       }
+
     }else{
       yyerror("ID is not a defined array");
     }
@@ -1027,15 +1039,16 @@ primary : NUMBER
 | ID '(' expression ')'
 {
   struct Node *temp = search($1);
-  if (temp == NULL || strcmp(temp->data.kind, "array") != 0){
+  if (temp == NULL){
     yyerror("ID not a defined array");
   }else{
     if (strcmp($3->kind, "number") == 0){
       fprintf(fp, "%i:  r%i := contents b, %i\n", instCtr++, regNum, $3->value + temp->data.offset);  
     }else{
-      int offsetReg = regNum++;
-      fprintf(fp, "%i:  r%i := r%i + %i\n", instCtr++, offsetReg, $3->address, temp->data.offset);
-      fprintf(fp, "%i:  r%i := contents b, r%i\n", instCtr++, regNum, offsetReg);
+      int offsetStore = regNum++; int sumStore = regNum++;
+      fprintf(fp, "%i:  r%i := %i\n", instCtr++, offsetStore, temp->data.offset);
+      fprintf(fp, "%i:  r%i := r%i + r%i\n", instCtr++, sumStore, $3->address, offsetStore);
+      fprintf(fp, "%i:  r%i := contents b, r%i\n", instCtr++, regNum, sumStore);
     }
     $$ = (struct exprNode*)malloc(sizeof(struct exprNode));
     $$->kind = mallocCpy("register");
