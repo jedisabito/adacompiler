@@ -517,20 +517,60 @@ procedure_call : ID '(' expression_list ')' opt_assign ';'
   struct Node *temp = search($1);
   if ($5 != NULL){
     if (temp != NULL){
+
+      int addressReg = 0;
+      if (temp->data.depth != 0){
+	int depth = temp->data.depth;
+	int firstTime = 1;
+	addressReg = regNum++;
+	while (depth  > 0){
+	  if (firstTime){
+	    fprintf(fp, "%i:  r%i := contents b, 2\n", instCtr, addressReg);
+	    instCtr++;
+	    firstTime = 0;
+	  }else{
+	    fprintf(fp, "%i:  r%i := contents r%i, 2\n", instCtr, addressReg, addressReg);
+	    instCtr++;
+	  }
+	  depth--;
+	}
+
+	
+	//fprintf(fp, "%i:  r%i := contents r%i, %i\n", instCtr, regNum, memory, temp->data.offset);
+      }
+
       if (strcmp($3->kind, "number") == 0 && strcmp($5->kind, "number") == 0){
-	fprintf(fp, "%i:  contents b, %i := %i\n", instCtr++, temp->data.offset + $3->value, $5->value);
+	if (addressReg == 0){
+	  fprintf(fp, "%i:  contents b, %i := %i\n", instCtr++, temp->data.offset + $3->value, $5->value);
+	}else{
+	  fprintf(fp, "%i:  contents r%i, %i := %i\n", instCtr++, addressReg, temp->data.offset + $3->value, $5->value);
+	}
       }else if (strcmp($3->kind, "number") == 0 && strcmp($5->kind, "register") == 0){
-	fprintf(fp, "%i:  contents b, %i := r%i\n", instCtr++, temp->data.offset + $3->value, $5->address);
+	if (addressReg == 0){
+	  fprintf(fp, "%i:  contents b, %i := r%i\n", instCtr++, temp->data.offset + $3->value, $5->address);
+	}else{
+	  fprintf(fp, "%i:  contents r%i, %i := r%i\n", instCtr++, addressReg, temp->data.offset + $3->value, $5->address);
+	}
       }else if (strcmp($3->kind, "register") == 0 && strcmp($5->kind, "number") == 0){
 	int offsetStore = regNum++; int sumStore = regNum++;
 	fprintf(fp, "%i:  r%i := %i\n", instCtr++, offsetStore, temp->data.offset);
 	fprintf(fp, "%i:  r%i := r%i + r%i\n", instCtr++, sumStore, $3->address, offsetStore);
-	fprintf(fp, "%i:  contents b, r%i := %i\n", instCtr++, sumStore, $5->value);
+
+	if (addressReg == 0){
+	  fprintf(fp, "%i:  contents b, r%i := %i\n", instCtr++, sumStore, $5->value);
+	}else{
+	  fprintf(fp, "%i:  contents r%i, r%i := %i\n", instCtr++, addressReg, sumStore, $5->value);
+	}
       }else{
 	int offsetStore = regNum++; int sumStore = regNum++;
 	fprintf(fp, "%i:  r%i := %i\n", instCtr++, offsetStore, temp->data.offset);
 	fprintf(fp, "%i:  r%i := r%i + r%i\n", instCtr++, sumStore, $3->address, offsetStore);
-	fprintf(fp, "%i:  contents b, r%i := r%i\n", instCtr++, sumStore, sumStore);
+
+	if (addressReg == 0){
+	  fprintf(fp, "%i:  contents b, r%i := r%i\n", instCtr++, sumStore, $5->address);
+	}else{
+	  fprintf(fp, "%i:  contents r%i, r%i := r%i\n", instCtr++, addressReg, sumStore, $5->address);
+	}
       }
 
     }else{
@@ -552,18 +592,29 @@ procedure_call : ID '(' expression_list ')' opt_assign ';'
 	}
       }else if (strcmp(temp->data.kind, "read_routine") == 0){
 	struct exprNode *temp = $3;
-	if (temp->next == NULL){
-	  if (strcmp($3->kind, "number") == 0){ 
-	    yyerror("cannot read a number");
+	while (temp != NULL){
+	  if (strcmp(temp->kind, "number") == 0){ 
+	     yyerror("cannot read a number");
 	  }else{
-	    if ($3->opDone){
-	      yyerror("read can only take in variables as parameters");
+	    if (temp->opDone){
+	      yyerror("invalid parameters for read");
 	    }else{
-	      fprintf(fp, "%i:  read r%i\n", instCtr++, temp->address);
+	      if (temp->boolean){
+		if (temp->memory != 0){
+		  fprintf(fp, "%i:  read_boolean contents r%i, %i\n", instCtr++, temp->memory, temp->offset);
+		}else{
+		  fprintf(fp, "%i:  read_boolean contents b, %i\n", instCtr++, temp->offset);
+		}
+	      }else{
+		if (temp->memory != 0){
+		  fprintf(fp, "%i:  read_integer contents r%i, %i\n", instCtr++, temp->memory, temp->offset);
+		}else{
+		  fprintf(fp, "%i:  read_integer contents b, %i\n", instCtr++, temp->offset);
+		}
+	      }
 	    }
 	  }
-	}else{
-	  yyerror("read can only take in one parameter");
+	  temp = temp->next;
 	}
       }else if (strcmp(temp->data.kind, "array") == 0){
 	yyerror("reference to array item without assignment");
@@ -649,6 +700,7 @@ expression : relation
     }else{
       $$->value = $1->value || $3->value;
     }
+    $$->boolean = 1;
   }else{
     $$->kind = mallocCpy("register");
 
@@ -672,6 +724,7 @@ expression : relation
 
     $$->address = regNum++;
     $$->opDone = 1;
+    $$->boolean = 1;
   }
 } 
 ;
@@ -703,6 +756,7 @@ relation : simple_expr
       case 'G':
 	$$->value = $1->value >= $3->value;
     }
+    $$->boolean = 1;
   }else{
     $$->kind = mallocCpy("register");
     char *token;
@@ -761,6 +815,7 @@ relation : simple_expr
     }
     $$->address = regNum++;
     $$->opDone = 1;
+    $$->boolean = 1;
   }
  
 }
@@ -790,6 +845,7 @@ simple_expr : '-' term
   if (strcmp($1->kind, "number") == 0 && strcmp($3->kind, "number") == 0){
     $$->kind = mallocCpy("number");
     $$->value = $1->value + $2 * $3->value;
+    $$->boolean = 1;
   }else{
     $$->kind = mallocCpy("register");
     
@@ -860,6 +916,7 @@ term : factor
       fprintf(fp, "%i:  r%i := r%i %c r%i\n", instCtr++, regNum, $1->address, sign, $3->address);
     }
     $$->address = regNum++;
+    $$->opDone = 1;
   }
 }
 ;
@@ -872,7 +929,7 @@ factor : primary
   
   if (strcmp($1->kind, "number") == 0 && strcmp($3->kind, "number") == 0){
     $$->kind = mallocCpy("number");
-    $$->value = pow($1->value, $3->value); 
+    $$->value = pow($1->value, $3->value);
   }else{
     
     int loop = instCtr + 9;
@@ -975,6 +1032,7 @@ factor : primary
     $$->address = regNum++;
   }
   $$->opDone = 1;
+  $$->boolean = 1;
 }
 ;
 
@@ -984,11 +1042,14 @@ primary : NUMBER
   $$->kind = mallocCpy("number");
   $$->value = $1;
   $$->opDone = 0;
+  $$->boolean = 0;
 }
 | ID
 {
   
   int enum_type = 0;
+
+  int memory, address;
 
   struct Node *temp = search($1);
 
@@ -999,9 +1060,12 @@ primary : NUMBER
       $$ = (struct exprNode*)malloc(sizeof(struct exprNode));
       $$->kind = mallocCpy("number");
       $$->value = temp->data.value;
+      $$->boolean = 1;
       enum_type = 1;
     }else if (temp->data.depth == 0){
       fprintf(fp, "%i:  r%i := contents b, %i\n", instCtr, regNum, temp->data.offset);
+      memory = 0;
+      address = regNum++;
       instCtr++;
     }else{
       int depth = temp->data.depth;
@@ -1018,7 +1082,9 @@ primary : NUMBER
 	depth--;
       }
 
-      fprintf(fp, "%i:  r%i := contents r%i, %i\n", instCtr, regNum, regNum, temp->data.offset);
+      memory = regNum++;
+      fprintf(fp, "%i:  r%i := contents r%i, %i\n", instCtr, regNum, memory, temp->data.offset);
+      address = regNum++;
       instCtr++;
 
     }
@@ -1026,8 +1092,15 @@ primary : NUMBER
       $$ = (struct exprNode*)malloc(sizeof(struct exprNode));
       $$->kind = mallocCpy("register");
       $$->offset = temp->data.offset;
-      $$->address = regNum++;
       $$->opDone = 0;
+      $$->memory = memory;
+      $$->address = address;
+
+      if (strcmp(temp->data.parent_type->data.name, "boolean") == 0){
+	$$->boolean = 1;
+      }else{
+	$$->boolean = 0;
+      }
     }
   }
   
@@ -1042,13 +1115,44 @@ primary : NUMBER
   if (temp == NULL){
     yyerror("ID not a defined array");
   }else{
+
+    int addressReg = 0;
+    if (temp->data.depth != 0){
+      int depth = temp->data.depth;
+      int firstTime = 1;
+      addressReg = regNum++;
+      while (depth  > 0){
+	if (firstTime){
+	  fprintf(fp, "%i:  r%i := contents b, 2\n", instCtr, addressReg);
+	  instCtr++;
+	  firstTime = 0;
+	}else{
+	  fprintf(fp, "%i:  r%i := contents r%i, 2\n", instCtr, addressReg, addressReg);
+	  instCtr++;
+	}
+	depth--;
+      }
+
+	
+      //fprintf(fp, "%i:  r%i := contents r%i, %i\n", instCtr, regNum, memory, temp->data.offset);
+    }
+
     if (strcmp($3->kind, "number") == 0){
-      fprintf(fp, "%i:  r%i := contents b, %i\n", instCtr++, regNum, $3->value + temp->data.offset);  
+      if (addressReg == 0){
+	fprintf(fp, "%i:  r%i := contents b, %i\n", instCtr++, regNum, $3->value + temp->data.offset);
+      }else{
+        fprintf(fp, "%i:  r%i := contents r%i, %i\n", instCtr++, regNum, addressReg, $3->value + temp->data.offset);
+      }
     }else{
       int offsetStore = regNum++; int sumStore = regNum++;
       fprintf(fp, "%i:  r%i := %i\n", instCtr++, offsetStore, temp->data.offset);
       fprintf(fp, "%i:  r%i := r%i + r%i\n", instCtr++, sumStore, $3->address, offsetStore);
-      fprintf(fp, "%i:  r%i := contents b, r%i\n", instCtr++, regNum, sumStore);
+
+      if (addressReg == 0){
+	fprintf(fp, "%i:  r%i := contents b, r%i\n", instCtr++, regNum, sumStore);
+      }else{
+	fprintf(fp, "%i:  r%i := contents r%i, r%i\n", instCtr++, regNum, addressReg, sumStore);
+      }
     }
     $$ = (struct exprNode*)malloc(sizeof(struct exprNode));
     $$->kind = mallocCpy("register");
@@ -1155,14 +1259,13 @@ int topBase = 0;
 struct exprNode {
   char *kind;
   struct exprNode *next;
-  int offset, address, value, opDone;
+  int offset, address, value, opDone, memory, boolean;
 };
 
 struct patchNode *patchList = NULL;
 
 main()
 {
-
   fp = fopen("output.txt", "w");
 
   init();
